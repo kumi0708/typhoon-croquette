@@ -278,8 +278,8 @@ async function findKorokke(lat,lon){
   // Overpass query: supermarkets, convenience stores, butchers within 2km
   const query=`[out:json][timeout:15];
 (
-  node["shop"~"^(supermarket|convenience|butcher|deli|greengrocer)$"](around:2000,${lat},${lon});
-  way["shop"~"^(supermarket|convenience|butcher|deli|greengrocer)$"](around:2000,${lat},${lon});
+  node["shop"~"^(supermarket|convenience|butcher|deli)$"](around:2000,${lat},${lon});
+  way["shop"~"^(supermarket|convenience|butcher|deli)$"](around:2000,${lat},${lon});
 );
 out center;`;
 
@@ -353,7 +353,7 @@ function flyToShop(lat,lon,name){
 }
 
 function shopTypeName(type){
-  const names={supermarket:'スーパー',convenience:'コンビニ',butcher:'精肉店',deli:'デリ',greengrocer:'青果店'};
+  const names={supermarket:'スーパー',convenience:'コンビニ',butcher:'精肉店',deli:'デリ'};
   return names[type]||type||'店舗';
 }
 
