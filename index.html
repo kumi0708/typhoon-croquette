@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🌀 台風コロッケ風況ビューア</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Meiryo,sans-serif;background:#0d1117;color:#e6edf3;height:100vh;display:flex;flex-direction:column}
+    #header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;z-index:1000}
+    #header h1{font-size:15px;font-weight:700;color:#58a6ff;white-space:nowrap}
+    #datatime{font-size:11px;color:#8b949e;margin-left:4px}
+    .ctrl-group{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap}
+    select,button{background:#21262d;color:#e6edf3;border:1px solid #30363d;padding:5px 10px;border-radius:6px;font-size:12px;cursor:pointer}
+    button:hover{background:#30363d}
+    button.primary{background:#1f6feb;border-color:#388bfd;color:#fff}
+    button.primary:hover{background:#388bfd}
+    button.danger{background:#6e1c23;border-color:#da3633;color:#fff}
+    #map{flex:1;width:100%}
+    .panel{position:absolute;top:10px;right:10px;width:270px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;z-index:500;font-size:12px;display:none}
+    .panel h3{color:#58a6ff;margin-bottom:8px;font-size:13px;border-bottom:1px solid #30363d;padding-bottom:6px}
+    .prow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d}
+    .prow:last-child{border-bottom:none}
+    .pval{color:#79c0ff;font-weight:600}
+    .legend{position:absolute;bottom:30px;left:10px;background:#161b22cc;border:1px solid #30363d;border-radius:6px;padding:10px;z-index:500;font-size:11px;backdrop-filter:blur(4px)}
+    .legend-title{color:#58a6ff;margin-bottom:6px;font-weight:700}
+    .li{display:flex;align-items:center;gap:6px;margin:3px 0}
+    .lc{width:20px;height:4px;border-radius:2px}
+    #loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#161b22;border:1px solid #30363d;padding:20px 28px;border-radius:10px;z-index:1001;text-align:center;color:#58a6ff;font-size:14px;display:none}
+    #loading.on{display:block}
+    .spinner{border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:0 auto 10px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    #korokke-panel{position:absolute;bottom:80px;right:10px;width:280px;background:#161b22;border:1px solid #f0883e;border-radius:8px;padding:12px;z-index:500;font-size:12px;display:none;max-height:260px;overflow-y:auto}
+    #korokke-panel h3{color:#f0883e;margin-bottom:8px;font-size:13px}
+    .shop-item{padding:6px;border-bottom:1px solid #21262d;cursor:pointer}
+    .shop-item:hover{background:#21262d;border-radius:4px}
+    .shop-name{color:#e6edf3;font-weight:600}
+    .shop-dist{color:#8b949e;font-size:11px}
+    .typhoon-alert{background:#6e1c23;border:1px solid #da3633;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:#ffa198;display:none}
+    #gps-btn{position:absolute;bottom:140px;right:10px;z-index:500;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;cursor:pointer;font-size:13px}
+    #gps-btn:hover{background:#30363d}
+    #hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);background:#161b22cc;border:1px solid #30363d;border-radius:20px;padding:6px 14px;font-size:11px;color:#8b949e;z-index:500;pointer-events:none;white-space:nowrap}
+  </style>
+</head>
+<body>
+<div style="position:relative;flex:1;display:flex;flex-direction:column">
+  <div id="header">
+    <h1>🌀 台風コロッケ 風況ビューア</h1>
+    <span id="datatime">読み込み中...</span>
+    <div class="ctrl-group">
+      <button class="primary" onclick="loadData()">🔄 更新</button>
+      <button id="typhoon-btn" onclick="toggleTyphoon()">🌀 台風</button>
+    </div>
+  </div>
+  <div id="map"></div>
+
+  <!-- Info panel -->
+  <div class="panel" id="info-panel">
+    <h3 id="panel-title">地点情報</h3>
+    <div id="panel-content"></div>
+  </div>
+
+  <!-- Korokke panel -->
+  <div id="korokke-panel">
+    <h3>🍖 近くのコロッケ購入スポット</h3>
+    <div class="typhoon-alert" id="typhoon-alert">⚠️ 台風接近中！今すぐコロッケを！</div>
+    <div id="shop-list"></div>
+  </div>
+
+  <!-- GPS button -->
+  <button id="gps-btn" onclick="findMyLocation()">📍 現在地 + コロッケ</button>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-title">風速 (m/s)</div>
+    <div class="li"><div class="lc" style="background:#a8dadc"></div><span>0–5</span></div>
+    <div class="li"><div class="lc" style="background:#4fc3f7"></div><span>5–10</span></div>
+    <div class="li"><div class="lc" style="background:#42a5f5"></div><span>10–15</span></div>
+    <div class="li"><div class="lc" style="background:#ffb74d"></div><span>15–20</span></div>
+    <div class="li"><div class="lc" style="background:#ef5350"></div><span>20+</span></div>
+  </div>
+
+  <div id="hint">矢印クリック → 地点情報</div>
+  <div id="loading"><div class="spinner"></div>データ取得中...</div>
+</div>
+
+<script>
+const AMEDAS = 'https://www.jma.go.jp/bosai/amedas';
+const OVERPASS_ENDPOINTS = [
+  'https://overpass.openstreetmap.fr/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+];
+
+// Direction index → degrees from N (clockwise). 0=calm, 1=NNE…16=N
+const DIR_DEG = [null,22.5,45,67.5,90,112.5,135,157.5,180,202.5,225,247.5,270,292.5,315,337.5,360];
+const DIR_NAME= ['静穏','北北東','北東','東北東','東','東南東','南東','南南東','南','南南西','南西','西南西','西','西北西','北西','北北西','北'];
+
+let map, stations={}, windData={}, arrowMarkers=[], myMarker=null, shopMarkers=[], typhoonLayer=null, typhoonVisible=true;
+
+// ── Map init ──────────────────────────────────────────────────────────────────
+map = L.map('map',{center:[36.5,136.5],zoom:5});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© OpenStreetMap contributors © CARTO',maxZoom:19,subdomains:'abcd'
+}).addTo(map);
+
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function loading(on){ document.getElementById('loading').className = on ? 'on' : ''; }
+
+function windColor(s){
+  if(s<5)  return '#a8dadc';
+  if(s<10) return '#4fc3f7';
+  if(s<15) return '#42a5f5';
+  if(s<20) return '#ffb74d';
+  return '#ef5350';
+}
+
+function arrowHTML(dirDeg, speed, color){
+  const sz = Math.max(14, Math.min(36, 8 + speed*1.4));
+  const toDeg = (dirDeg + 180) % 360; // particle moves TO this direction
+  return `<div style="width:${sz}px;height:${sz}px;transform:rotate(${toDeg}deg);filter:drop-shadow(0 0 2px #000)">
+    <svg viewBox="0 0 24 24" width="${sz}" height="${sz}">
+      <polygon points="12,2 17,20 12,15 7,20" fill="${color}" stroke="#00000080" stroke-width="1"/>
+    </svg></div>`;
+}
+
+function calmHTML(color){
+  return `<div style="width:10px;height:10px;border-radius:50%;background:${color};border:1px solid #00000060;margin:2px"></div>`;
+}
+
+function timeToPath(iso){
+  const d = new Date(iso);
+  const jst = new Date(d.getTime());
+  const p = n => String(n).padStart(2,'0');
+  return `${jst.getUTCFullYear()}${p(jst.getUTCMonth()+1)}${p(jst.getUTCDate())}${p(jst.getUTCHours())}${p(jst.getUTCMinutes())}00`;
+}
+
+function fmtTime(iso){
+  const d = new Date(iso);
+  // convert to JST
+  const jst = new Date(d.getTime() + 9*3600*1000);
+  const p = n => String(n).padStart(2,'0');
+  return `${jst.getUTCFullYear()}/${p(jst.getUTCMonth()+1)}/${p(jst.getUTCDate())} ${p(jst.getUTCHours())}:${p(jst.getUTCMinutes())} JST`;
+}
+
+function stationLatLon(st){
+  return [st.lat[0] + st.lat[1]/60, st.lon[0] + st.lon[1]/60];
+}
+
+// ── Load data ──────────────────────────────────────────────────────────────────
+async function loadData(){
+  loading(true);
+  try{
+    const timeRaw = await fetch(`${AMEDAS}/data/latest_time.txt`).then(r=>r.text());
+    const timeStr = timeRaw.trim();
+    document.getElementById('datatime').textContent = fmtTime(timeStr);
+
+    if(!Object.keys(stations).length){
+      stations = await fetch(`${AMEDAS}/const/amedastable.json`).then(r=>r.json());
+    }
+
+    const path = timeToPath(timeStr);
+    windData = await fetch(`${AMEDAS}/data/map/${path}.json`).then(r=>r.json());
+
+    renderArrows();
+  } catch(e){
+    document.getElementById('datatime').textContent = 'エラー: '+e.message;
+    console.error('loadData error',e);
+  }
+  loading(false);
+}
+
+// ── Render arrows ─────────────────────────────────────────────────────────────
+function renderArrows(){
+  arrowMarkers.forEach(m=>map.removeLayer(m));
+  arrowMarkers=[];
+
+  for(const [code, st] of Object.entries(stations)){
+    if(!st.lat||!st.lon) continue;
+    const d = windData[code];
+    if(!d||d.wind==null) continue;
+
+    const speed = d.wind[0];
+    const dir   = (d.windDirection != null) ? d.windDirection[0] : 0;
+    const color = windColor(speed);
+
+    const html = (dir===0||speed<0.3) ? calmHTML(color) : arrowHTML(DIR_DEG[dir]||0, speed, color);
+    const icon = L.divIcon({html, iconSize:[30,30], iconAnchor:[15,15], className:''});
+    const [lat,lon] = stationLatLon(st);
+    const m = L.marker([lat,lon],{icon,zIndexOffset:1}).addTo(map);
+    m.on('click', ev=>{ ev.originalEvent.stopPropagation(); showPanel(code,st,d,speed,dir); });
+    arrowMarkers.push(m);
+  }
+}
+
+// ── Info panel ────────────────────────────────────────────────────────────────
+function showPanel(code,st,d,speed,dir){
+  document.getElementById('panel-title').textContent = st.kjName||st.enName||code;
+  document.getElementById('panel-content').innerHTML = `
+    <div class="prow"><span>風速</span><span class="pval">${speed} m/s</span></div>
+    <div class="prow"><span>風向</span><span class="pval">${DIR_NAME[dir]||'-'}</span></div>
+    ${d.temp?`<div class="prow"><span>気温</span><span class="pval">${d.temp[0]} ℃</span></div>`:''}
+    ${d.humidity?`<div class="prow"><span>湿度</span><span class="pval">${d.humidity[0]} %</span></div>`:''}
+    ${d.precipitation1h?`<div class="prow"><span>降水量(1h)</span><span class="pval">${d.precipitation1h[0]} mm</span></div>`:''}
+    ${d.pressure?`<div class="prow"><span>気圧</span><span class="pval">${d.pressure[0]} hPa</span></div>`:''}
+    <div class="prow"><span>標高</span><span class="pval">${st.alt??'-'} m</span></div>
+  `;
+  document.getElementById('info-panel').style.display='block';
+}
+
+// ── Wind interpolation (IDW) ──────────────────────────────────────────────────
+function interpolateWind(lat, lon){
+  const pts=[];
+  for(const [code,st] of Object.entries(stations)){
+    if(!st.lat||!st.lon) continue;
+    const d=windData[code];
+    if(!d||d.wind==null) continue;
+    const [sLat,sLon]=stationLatLon(st);
+    let dist=Math.hypot((lat-sLat)*111,(lon-sLon)*111*Math.cos(lat*Math.PI/180));
+    if(dist<0.1) dist=0.1;
+    const speed=d.wind[0];
+    const dir=(d.windDirection!=null)?d.windDirection[0]:0;
+    if(dir===0||speed<0.1){pts.push({u:0,v:0,dist});continue;}
+    const rad=(DIR_DEG[dir]||0)*Math.PI/180;
+    // wind FROM dirRad → particle moves TO dirRad+180 → u=-sin, v=-cos
+    pts.push({u:-speed*Math.sin(rad), v:-speed*Math.cos(rad), dist});
+  }
+  pts.sort((a,b)=>a.dist-b.dist);
+  const near=pts.slice(0,10);
+  if(!near.length) return{u:0,v:0};
+  let sw=0,su=0,sv=0;
+  for(const p of near){const w=1/(p.dist*p.dist);sw+=w;su+=p.u*w;sv+=p.v*w;}
+  return{u:su/sw,v:sv/sw};
+}
+
+
+// ── GPS + Korokke ─────────────────────────────────────────────────────────────
+function findMyLocation(){
+  if(!navigator.geolocation){alert('Geolocationが使えません');return;}
+  loading(true);
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      loading(false);
+      const {latitude:lat, longitude:lon} = pos.coords;
+
+      // Place marker
+      if(myMarker) map.removeLayer(myMarker);
+      myMarker = L.circleMarker([lat,lon],{
+        radius:12,color:'#f0883e',fillColor:'#f0883e',fillOpacity:0.9,weight:3
+      }).addTo(map).bindPopup('📍 現在地').openPopup();
+      map.setView([lat,lon], Math.max(map.getZoom(),9));
+
+      // Check local wind speed for typhoon alert
+      const {u,v} = interpolateWind(lat,lon);
+      const localSpeed = Math.hypot(u,v);
+      const typhoon = localSpeed>=15;
+      document.getElementById('typhoon-alert').style.display = typhoon?'block':'none';
+
+      // Find nearby croquette shops
+      findKorokke(lat,lon);
+    },
+    err => {
+      loading(false);
+      alert('位置情報の取得に失敗しました: '+err.message);
+    },
+    {timeout:10000,enableHighAccuracy:true}
+  );
+}
+
+async function findKorokke(lat,lon){
+  const panel = document.getElementById('korokke-panel');
+  const list  = document.getElementById('shop-list');
+  panel.style.display='block';
+  list.innerHTML='<div style="color:#8b949e;padding:8px">店舗を検索中...</div>';
+
+  // Overpass query: supermarkets, convenience stores, butchers within 2km
+  const query=`[out:json][timeout:15];
+(
+  node["shop"~"^(supermarket|convenience|butcher|deli|greengrocer)$"](around:2000,${lat},${lon});
+  way["shop"~"^(supermarket|convenience|butcher|deli|greengrocer)$"](around:2000,${lat},${lon});
+);
+out center;`;
+
+  try{
+    let json = null;
+    let lastErr = null;
+    for(let i=0;i<OVERPASS_ENDPOINTS.length;i++){
+      const endpoint = OVERPASS_ENDPOINTS[i];
+      list.innerHTML=`<div style="color:#8b949e;padding:8px">検索中 (${i+1}/${OVERPASS_ENDPOINTS.length})...</div>`;
+      try{
+        const ctrl = new AbortController();
+        const tid = setTimeout(()=>ctrl.abort(new Error('timeout')), 20000);
+        const res = await fetch(endpoint,{
+          method:'POST',
+          headers:{'Content-Type':'application/x-www-form-urlencoded'},
+          body:'data='+encodeURIComponent(query),
+          signal:ctrl.signal,
+        });
+        clearTimeout(tid);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        json = await res.json();
+        break;
+      } catch(err){ lastErr=err; }
+    }
+    if(!json) throw lastErr;
+    const elements = json.elements||[];
+
+    if(!elements.length){
+      list.innerHTML='<div style="color:#8b949e;padding:8px">近くに店舗が見つかりませんでした</div>';
+      return;
+    }
+
+    // Compute distance & sort
+    const shops = elements.map(el=>{
+      const eLat = el.lat ?? el.center?.lat;
+      const eLon = el.lon ?? el.center?.lon;
+      const dist = haversine(lat,lon,eLat,eLon);
+      const name = el.tags?.name || el.tags?.['name:ja'] || shopTypeName(el.tags?.shop);
+      const type = shopTypeName(el.tags?.shop);
+      return{name,type,dist,lat:eLat,lon:eLon};
+    }).sort((a,b)=>a.dist-b.dist).slice(0,8);
+
+    list.innerHTML = shops.map((s,i)=>`
+      <div class="shop-item" onclick="flyToShop(${s.lat},${s.lon},'${s.name.replace(/'/g,'&#39;')}')">
+        <div class="shop-name">${i+1}. ${s.name}</div>
+        <div class="shop-dist">${s.type} ／ ${s.dist<1?(s.dist*1000).toFixed(0)+'m':(s.dist.toFixed(1))+'km'}</div>
+      </div>`).join('');
+
+    // Clear old shop markers then add new ones
+    shopMarkers.forEach(m=>map.removeLayer(m));
+    shopMarkers=[];
+    for(const s of shops){
+      if(!s.lat||!s.lon) continue;
+      const icon = L.divIcon({
+        html:`<div style="background:#f0883e;border:2px solid #fff;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:9px">🍖</div>`,
+        iconSize:[18,18],iconAnchor:[9,9],className:''
+      });
+      const m = L.marker([s.lat,s.lon],{icon,zIndexOffset:100}).addTo(map)
+        .bindTooltip(s.name,{direction:'top'});
+      shopMarkers.push(m);
+    }
+  } catch(e){
+    list.innerHTML=`<div style="color:#f85149;padding:8px">取得エラー: ${e.message}</div>`;
+    console.error('korokke search error',e);
+  }
+}
+
+function flyToShop(lat,lon,name){
+  map.setView([lat,lon],16);
+  L.popup().setLatLng([lat,lon]).setContent(`🍖 ${name}`).openOn(map);
+}
+
+function shopTypeName(type){
+  const names={supermarket:'スーパー',convenience:'コンビニ',butcher:'精肉店',deli:'デリ',greengrocer:'青果店'};
+  return names[type]||type||'店舗';
+}
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371;
+  const dLat=(lat2-lat1)*Math.PI/180;
+  const dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// ── Typhoon ───────────────────────────────────────────────────────────────────
+const TYPHOON_API = 'https://www.jma.go.jp/bosai/typhoon/data';
+const CAT_COLOR = {
+  'TD':'#90caf9','TS':'#4fc3f7','STS':'#ffb74d','T':'#ef5350','VT':'#ce93d8'
+};
+
+async function loadTyphoon(){
+  try{
+    const list = await fetch(`${TYPHOON_API}/targetTc.json`).then(r=>r.json());
+    if(!list.length){ clearTyphoon(); return; }
+
+    const layers=[];
+    for(const tc of list){
+      const data = await fetch(`${TYPHOON_API}/${tc.tropicalCyclone}/forecast.json`).then(r=>r.json());
+      const color = CAT_COLOR[tc.category] || '#ef5350';
+      const title = data.find(x=>x.part==='title');
+      const name = title?.name?.jp || tc.typhoonNumber;
+
+      // 実況: 過去軌跡
+      const obs = data.find(x=>x.advancedHours===0);
+      if(obs?.track){
+        const prePts = (obs.track.preTyphoon||[]).map(p=>[p[0],p[1]]);
+        if(prePts.length>1)
+          layers.push(L.polyline(prePts,{color:'#666',weight:1.5,dashArray:'4 4',opacity:0.7}));
+        const tyPts = (obs.track.typhoon||[]).map(p=>[p[0],p[1]]);
+        if(tyPts.length>1)
+          layers.push(L.polyline(tyPts,{color,weight:2.5,opacity:0.9}));
+      }
+
+      // 予報ポイント
+      const forecasts = data.filter(x=>x.advancedHours>0 && x.center);
+      const fcPts = forecasts.map(x=>[x.center[0],x.center[1]]);
+
+      // 現在位置（実況の最後 or 最初の予報）
+      const curPt = obs?.track?.typhoon?.slice(-1)[0] || fcPts[0];
+      if(curPt){
+        const icon = L.divIcon({
+          html:`<div style="font-size:22px;line-height:1;filter:drop-shadow(0 0 4px ${color})">🌀</div>`,
+          iconSize:[28,28],iconAnchor:[14,14],className:''
+        });
+        layers.push(L.marker([curPt[0],curPt[1]],{icon,zIndexOffset:200})
+          .bindTooltip(`台風${tc.typhoonNumber} ${name}<br>${tc.category}`,{permanent:false,direction:'top'}));
+      }
+
+      if(fcPts.length>1)
+        layers.push(L.polyline(fcPts,{color,weight:2,dashArray:'6 4',opacity:0.8}));
+
+      // 予報円・暴風域
+      for(const fc of forecasts){
+        if(fc.probabilityCircle?.radius){
+          layers.push(L.circle([fc.center[0],fc.center[1]],{
+            radius:fc.probabilityCircle.radius,
+            color,weight:1,fillColor:color,fillOpacity:0.06,dashArray:'4 4'
+          }));
+        }
+        if(fc.galeWarningArea?.center && fc.galeWarningArea?.radius){
+          layers.push(L.circle(fc.galeWarningArea.center,{
+            radius:fc.galeWarningArea.radius,
+            color:'#ef5350',weight:1,fillColor:'#ef5350',fillOpacity:0.08
+          }));
+        }
+      }
+
+      // 現在の暴風域（実況）
+      if(obs?.galeWarningArea?.center && obs?.galeWarningArea?.radius){
+        layers.push(L.circle(obs.galeWarningArea.center,{
+          radius:obs.galeWarningArea.radius,
+          color:'#ef5350',weight:2,fillColor:'#ef5350',fillOpacity:0.15
+        }));
+      }
+    }
+
+    if(typhoonLayer) map.removeLayer(typhoonLayer);
+    typhoonLayer = L.layerGroup(layers).addTo(map);
+    typhoonVisible = true;
+    document.getElementById('typhoon-btn').style.background='#1f6feb';
+  } catch(e){
+    console.error('typhoon load error',e);
+  }
+}
+
+function clearTyphoon(){
+  if(typhoonLayer){ map.removeLayer(typhoonLayer); typhoonLayer=null; }
+}
+
+function toggleTyphoon(){
+  if(typhoonVisible){ clearTyphoon(); typhoonVisible=false; document.getElementById('typhoon-btn').style.background=''; }
+  else loadTyphoon();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadData();
+loadTyphoon();
+setInterval(loadData, 10*60*1000);
+setInterval(loadTyphoon, 10*60*1000);
+</script>
+</body>
+</html>
